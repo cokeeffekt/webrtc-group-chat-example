@@ -11,173 +11,243 @@
     html,
     body {
       background-color: #333;
+      width: 100%;
+      height: 100%;
+      padding: 2px;
+      margin: 0;
     }
 
-    video {
-      width: 320px;
-      height: 240px;
-      border: 1px solid black;
+    * {
+      box-sizing: border-box;
+    }
+
+    .log {
+      width: 100%;
+      height: 100%;
+      padding: 3px;
+      font-family: monospace;
+      white-space: pre;
+      overflow: scroll
+    }
+
+    section {
+      position: fixed;
+      top: 0;
+      right: 0;
     }
   </style>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script>
-    var ICE_SERVERS = [{
-      url: "stun:stun.l.google.com:19302"
-    }];
-  </script>
-
-
-  <script>
-    var signaling_socket = null; /* our socket.io connection to our webserver */
-    var peers = {}; /* keep track of our peer connections, indexed by peer_id (aka socket.io id) */
-    var peer_media_elements = {}; /* keep track of our <video>/<audio> tags, indexed by peer_id */
-
-    function init() {
-      console.log("Connecting to signaling server");
-      signaling_socket = io.connect();
-
-      signaling_socket.on('connect', function() {
-        console.log("Connected to signaling server");
-      });
-
-      signaling_socket.on('disconnect', function() {
-
-      });
-
-      /**
-       * When we join a group, our signaling server will send out 'addPeer' events to each pair
-       * of users in the group (creating a fully-connected graph of users, ie if there are 6 people
-       * in the channel you will connect directly to the other 5, so there will be a total of 15
-       * connections in the network).
-       */
-      signaling_socket.on('addPeer', function(config) {
-        var peer_id = config.peer_id;
-        console.log('Signaling server said to add peer:', peer_id);
-        if (peer_id in peers) {
-          console.log("Already connected to peer ", peer_id);
-          return;
-        }
-
-        var peer_connection = new webkitRTCPeerConnection({
-          "iceServers": ICE_SERVERS
-        }, {
-          "optional": [{
-            "DtlsSrtpKeyAgreement": true
-          }]
-        });
-
-        peer_connection.dataChannel = peer_connection.createDataChannel("rtcbus");
-
-        peers[peer_id] = peer_connection;
-
-        peer_connection.onicecandidate = function(event) {
-          if (event.candidate) {
-            signaling_socket.emit('relayICECandidate', {
-              'peer_id': peer_id,
-              'ice_candidate': {
-                'sdpMLineIndex': event.candidate.sdpMLineIndex,
-                'candidate': event.candidate.candidate
-              }
-            });
-          }
-        }
-
-        peer_connection.ondatachannel = function(event) {
-          var receiveChannel = event.channel;
-          receiveChannel.onmessage = function(event) {
-            console.log('DC MESSAGE:', event);
-          };
-          receiveChannel.onopen = function(event) {
-            console.log('DC OPEN:', event);
-          };
-          receiveChannel.onclose = function(event) {
-            console.log('DC CLOSE:', event);
-          };
-        };
-
-        // create offer if server says to.
-        if (config.should_create_offer) {
-          console.log("Creating RTC offer to ", peer_id);
-          peer_connection.createOffer(
-            function(local_description) {
-              peer_connection.setLocalDescription(local_description,
-                function() {
-                  signaling_socket.emit('relaySessionDescription', {
-                    'peer_id': peer_id,
-                    'session_description': local_description
-                  });
-                },
-                function() {
-                  console.warn("Offer setLocalDescription failed!");
-                }
-              );
-            },
-            function(error) {
-              console.log("Error sending offer: ", error);
-            });
-        } else {
-          console.log('no creating offer');
-        }
-      });
-
-      signaling_socket.on('sessionDescription', function(config) {
-        console.log('Remote description received: ', config);
-        var peer_id = config.peer_id;
-        var peer = peers[peer_id];
-        var remote_description = config.session_description;
-
-        var desc = new RTCSessionDescription(remote_description);
-        var stuff = peer.setRemoteDescription(desc,
-          function() {
-            if (remote_description.type == "offer") {
-              peer.createAnswer(
-                function(local_description) {
-                  peer.setLocalDescription(local_description,
-                    function() {
-                      signaling_socket.emit('relaySessionDescription', {
-                        'peer_id': peer_id,
-                        'session_description': local_description
-                      });
-                    },
-                    function() {
-                      Alert("Answer setLocalDescription failed!");
-                    }
-                  );
-                },
-                function(error) {
-                  console.warn("Error creating answer: ", error);
-                });
-            }
-          },
-          function(error) {
-            console.log("setRemoteDescription error: ", error);
-          }
-        );
-        console.log("Description Object: ", desc);
-
-      });
-
-      signaling_socket.on('iceCandidate', function(config) {
-        var peer = peers[config.peer_id];
-        var ice_candidate = config.ice_candidate;
-        peer.addIceCandidate(new RTCIceCandidate(ice_candidate));
-      });
-
-      signaling_socket.on('removePeer', function(peer_id) {
-        console.log('Signaling server said to remove peer:', peer_id);
-        var peer_id = peer_id;
-
-        if (peer_id in peers) {
-          peers[peer_id].close();
-        }
-        delete peers[peer_id];
-      });
-    }
-  </script>
 </head>
 
 <body onload='init()'>
+  <section>
+    <button id="b_a">A</button>
+    <button id="b_b">B</button>
+    <button id="b_c">C</button>
+    <button id="b_d">D</button>
+    <button id="b_e">E</button>
+  </section>
+  <div class="log"></div>
 </body>
+
+
+<script>
+  var peerTap = function (socket, ice) {
+
+    var ICE_SERVERS = ice || [{
+      url: 'stun:stun.l.google.com:19302'
+    }];
+
+    this.peers = {};
+    this.events = {};
+    socket.on('addPeer', (config) => {
+      if (config.peer_id in this.peers)
+        return; // peer is already in peer list;
+
+      var peer_connection = new webkitRTCPeerConnection({
+        iceServers: ICE_SERVERS
+      }, {
+        optional: [{
+          DtlsSrtpKeyAgreement: true
+        }]
+      });
+
+      peer_connection.dataChannel = peer_connection.createDataChannel('peertaprtcbus');
+
+      peer_connection.emit = function (channel, data) {
+        var flattened = JSON.stringify({
+          c: channel,
+          d: data
+        });
+        peer_connection.dataChannel.send(flattened);
+      };
+      peer_connection.peer_id = config.peer_id;
+
+      this.peers[config.peer_id] = peer_connection;
+
+      peer_connection.onicecandidate = event => {
+        if (event.candidate) {
+          socket.emit('relayICECandidate', {
+            'peer_id': config.peer_id,
+            'ice_candidate': {
+              'sdpMLineIndex': event.candidate.sdpMLineIndex,
+              'candidate': event.candidate.candidate
+            }
+          });
+        }
+      };
+
+      peer_connection.ondatachannel = event => {
+
+        var receiveChannel = event.channel;
+        receiveChannel.onmessage = event => {
+          try {
+            var eR = JSON.parse(event.data);
+            if (eR.c) {
+              this.triggerEvent(eR.c, [peer_connection, eR.d]);
+            }
+          } catch (e) {
+            console.log(e);
+          }
+        };
+        receiveChannel.onopen = event => {
+          this.triggerEvent('peer-connected', [peer_connection]);
+        };
+        receiveChannel.onclose = event => {
+          this.triggerEvent('peer-connected', [config.peer_id]);
+          delete this.peers[config.peer_id];
+        };
+      };
+      if (config.should_create_offer) {
+        //        logme('Creating RTC offer to ', config.peer_id);
+        peer_connection.createOffer(
+          function (local_description) {
+            peer_connection.setLocalDescription(local_description, () => {
+              socket.emit('relaySessionDescription', {
+                'peer_id': config.peer_id,
+                'session_description': local_description
+              });
+            }, (error) => {});
+          }, (error) => {});
+      }
+    });
+    socket.on('sessionDescription', (config) => {
+      //      logme('Remote description received: ', config);
+      var peer = this.peers[config.peer_id];
+      var remote_description = config.session_description;
+
+      var desc = new RTCSessionDescription(remote_description);
+      var stuff = peer.setRemoteDescription(desc,
+        function () {
+          if (remote_description.type == 'offer') {
+            peer.createAnswer(local_description => {
+              peer.setLocalDescription(local_description, () => {
+                signaling_socket.emit('relaySessionDescription', {
+                  'peer_id': config.peer_id,
+                  'session_description': local_description
+                });
+              }, (error) => {});
+            }, (error) => {});
+          }
+        }, (error) => {}
+      );
+    });
+
+    socket.on('iceCandidate', config => {
+      var peer = this.peers[config.peer_id];
+      var ice_candidate = config.ice_candidate;
+      peer.addIceCandidate(new RTCIceCandidate(ice_candidate));
+    });
+
+    socket.on('removePeer', peer_id => {
+      if (peer_id in this.peers) {
+        this.peers[peer_id].close();
+      }
+      delete this.peers[peer_id];
+    });
+  };
+
+  peerTap.prototype.triggerEvent = function (event, dataArray) {
+    Object.keys(this.events).forEach(eKey => {
+      if (eKey.split('.')[0] == event)
+        this.events[event].forEach(func => {
+          func(...dataArray);
+        });
+    });
+  };
+  peerTap.prototype.list = function () {
+    console.log(this.peers);
+  };
+
+  peerTap.prototype.broadcast = function (channel, data) {
+    Object.values(this.peers).forEach(peer => {
+      peer.emit(channel, data);
+    });
+  };
+
+  peerTap.prototype.on = function (event, func) {
+    if (typeof func != 'function') return;
+    if (event in this.events)
+      return this.events[event].push(func);
+    this.events[event] = [func];
+  };
+
+
+  var signaling_socket = null; /* our socket.io connection to our webserver */
+  var peerTapIo = null;
+
+  $log = $('.log').css('background-color', 'blue');
+
+  function logme(text, obj) {
+    var extra = '';
+    if (obj) {
+      extra = '\n' + JSON.stringify(obj, null, 2);
+    }
+    $log.append('<div> > ' + text + extra + '</div>');
+    $log.scrollTop($log[0].scrollHeight);
+  }
+
+  function init() {
+    logme("Connecting to signaling server");
+    signaling_socket = io.connect();
+
+    signaling_socket.on('connect', function () {
+      logme('Connected to signaling server');
+      $log.css('background-color', '#eaffed');
+    });
+
+    signaling_socket.on('disconnect', function () {
+      $log.css('background-color', 'blue');
+    });
+
+    peerTapIo = new peerTap(signaling_socket);
+
+    peerTapIo.on('testing', (peer, resp) => {
+      logme('Got message', resp);
+    });
+    peerTapIo.on('peer-connected', peer => {
+      logme('Connected to Peer:' + peer.peer_id);
+    });
+
+  }
+
+
+  $('#b_a').on('click', function () {
+    peerTapIo.list();
+  });
+  $('#b_b').on('click', function () {
+    peerTapIo.broadcast('testing', ['duviuvw', 13]);
+  });
+  $('#b_c').on('click', function () {
+    console.log('button.click');
+  });
+  $('#b_d').on('click', function () {
+    console.log('button.click');
+  });
+  $('#b_e').on('click', function () {
+    console.log('button.click');
+  });
+</script>
 
 </html>

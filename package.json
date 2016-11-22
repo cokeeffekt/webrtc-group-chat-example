@@ -1,0 +1,20 @@
+{
+  "name": "webrtc-group-chat-example",
+  "version": "1.0.0",
+  "description": "About =====",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node signaling-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cokeeffekt/webrtc-group-chat-example.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/cokeeffekt/webrtc-group-chat-example/issues"
+  },
+  "homepage": "https://github.com/cokeeffekt/webrtc-group-chat-example#readme"
+}
