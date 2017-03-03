@@ -16,5 +16,8 @@
   "bugs": {
     "url": "https://github.com/cokeeffekt/webrtc-group-chat-example/issues"
   },
-  "homepage": "https://github.com/cokeeffekt/webrtc-group-chat-example#readme"
+  "homepage": "https://github.com/cokeeffekt/webrtc-group-chat-example#readme",
+  "dependencies": {
+    "uws": "^0.13.0"
+  }
 }
