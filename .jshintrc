@@ -1,6 +1,6 @@
 {
   //http://jshint.com/docs/options/
-  "bitwise": true,
+  "bitwise": false,
   "camelcase": false,
   "curly": false,
   "eqeqeq": false,
