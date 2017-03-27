@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Document</title>
+  <style>
+    body {
+      background-color: lightgreen;
+      font-size: 12px;
+    }
+    
+    .fixed {
+      position: fixed;
+    }
+    
+    #logs>div:nth-child(odd) {
+      background-color: rgba(0, 0, 0, 0.2);
+    }
+  </style>
+  <script>
+    var socketClient = function (path, conf) {
+      var autoReconnect = true;
+      var connectionAttemps = 0;
+
+      this.id = null;
+      this.token = conf.token;
+      this.metadata = null;
+
+      var connection;
+      if (conf.initConnect !== false)
+        connect();
+
+      var eventsRegister = [];
+
+      this.eventsRegister = function () {
+        return eventsRegister;
+      };
+
+      this.on = function (ievent, cb, once) {
+        if (typeof cb != 'function') return;
+        var [event, namespace] = ievent.split('.');
+        eventsRegister.push({
+          event: event,
+          regex: new RegExp('^' + event.replace('*', '.+') + '$'),
+          namespace: namespace,
+          func: cb,
+          once: once
+        });
+      };
+
+      this.off = function (ievent) {
+        var [event, namespace] = ievent.split('.');
+        eventsRegister
+          .filter(e => (e.event == event && e.namespace == namespace))
+          .map(v => eventsRegister.findIndex(f => f == v))
+          .reverse().forEach(i => eventsRegister.splice(i, 1));
+      };
+
+      // trigger function for all events
+      var trigger = (event, data) => {
+        data = data || [null];
+        eventsRegister
+          .filter(e => event.match(e.regex))
+          .forEach(e => {
+            e.func(...data, event, e.event + (e.namespace ? '.' + e.namespace : ''));
+            if (e.once)
+              this.off(e.event + (e.namespace ? '.' + e.namespace : ''));
+          });
+      }
+
+      this.connect = connect.bind(this);
+
+      this.close = function () {
+        autoReconnect = false;
+        connection.close();
+      };
+
+      this.send = function (event, payload, reply) {
+        if (connection && connection.readyState <= 1) {
+          var replyId = false
+          if (typeof reply == 'function') {
+            replyId = '_reply:' + generateUID();
+            this.on(replyId, reply, true);
+          }
+          return connection.send(JSON.stringify([event, payload, replyId]));
+        }
+        trigger('error', ['connection state is not ready']);
+      };
+
+      function connect(newToken) {
+        this.token = newToken || this.token;
+        if (connection && connection.readyState <= 1)
+          return console.warn('Websocket state already active.', connection);
+        connection = new WebSocket(path + (this.token ? '?token=' + this.token : ''));
+
+        connection.onopen = function () {
+          connectionAttemps = 0;
+        };
+        connection.onclose = function () {
+          trigger('disconnected');
+          connectionAttemps++;
+          setTimeout(() => {
+            if (autoReconnect)
+              connect();
+          }, 500 * connectionAttemps);
+        };
+
+        connection.onerror = function (error) {
+          trigger('error', [error]);
+        };
+
+        window.addEventListener("beforeunload", () => {
+          connection.close();
+        });
+
+        var libReserved = {
+          _acceptAuth: (data) => {
+            this.id = data.id;
+            this.token = data.token;
+            this.metadata = data.metadata;
+            trigger('connect', [data]);
+          },
+          _kickConnection: data => {
+            autoReconnect = false;
+            trigger('error', ['Connection closed by server!']);
+            return;
+          },
+          _denyAuth: data => {
+            autoReconnect = false;
+            trigger('error', ['Authentication Failed! invalid token ' + this.token]);
+            return;
+          },
+          _reply: data => {
+            connection.onmessage({
+              data: data
+            });
+          }
+        };
+
+        connection.onmessage = function (e, block) {
+          var event, data;
+          try {
+            [event, data] = JSON.parse(e.data);
+          } catch (err) {
+            console.warn(err, e);
+          }
+          if (typeof libReserved[event] == 'function')
+            return libReserved[event].apply(this, [data]);
+
+          trigger(event, [data]);
+        };
+      }
+
+      function generateUID() {
+        var firstPart = (Math.random() * 46656) | 0;
+        var secondPart = (Math.random() * 46656) | 0;
+        firstPart = ('000' + firstPart.toString(36)).slice(-3);
+        secondPart = ('000' + secondPart.toString(36)).slice(-3);
+        return firstPart + secondPart;
+      }
+
+    };
+
+
+    // non framework
+
+    function logme(value) {
+      var l = document.createElement('div');
+      l.innerHTML = JSON.stringify(value);
+      document.getElementById('logs').appendChild(l);
+    }
+
+    var wsClient = new socketClient('ws://localhost:8585', {
+      initConnect: false,
+      token: 'abc123' + Math.round(Math.random() * 10)
+    });
+
+    wsClient.on('error', function (data) {
+      logme(['ERROR', data]);
+      console.warn('error', data);
+    });
+
+    wsClient.on('connect', function (data) {
+      logme(['Connected', data]);
+    });
+    wsClient.on('disconnected', function (data) {
+      logme(['Disconnected']);
+    });
+    wsClient.on('derka', function (data) {
+      logme(['Message', data]);
+    });
+  </script>
+</head>
+
+<body>
+  <div class="fixed">
+    <button id="connect">C</button>
+    <button id="dc">DC</button>
+    <button id="sendPing">P</button>
+    <button id="sendbroadcast">BC</button>
+    <button id="clear">CL</button>
+    <button id="onlinelist">OL</button>
+    <input type="text" id="sendInput" style="width:20px;">
+    <button id="sendButton">S</button>
+  </div>
+  <br>
+
+  <pre id="logs"></pre>
+
+
+  <script>
+    (function () {
+      document.getElementById('connect').onclick = () => {
+        wsClient.connect();
+      };
+      document.getElementById('dc').onclick = wsClient.close;
+      document.getElementById('clear').onclick = function () {
+        document.getElementById('logs').innerHTML = '';
+      };
+
+      document.getElementById('sendButton').onclick = function () {
+        wsClient.send('sendto', [document.getElementById('sendInput').value, 'Sentfrom']);
+      };
+
+      document.getElementById('onlinelist').onclick = function () {
+        wsClient.send('onlinelist');
+      };
+
+      document.getElementById('sendbroadcast').onclick = function () {
+        logme(['Broadcasting', Date.now()]);
+        wsClient.send('broadcast', Date.now());
+      };
+
+      document.getElementById('sendPing').onclick = function () {
+        logme(['Ping', Date.now()]);
+        wsClient.send('ping', {
+          test: 123
+        }, function (pid) {
+          logme(['Pong', Date.now(), pid]);
+        });
+      };
+    })();
+  </script>
+</body>
+
+</html>

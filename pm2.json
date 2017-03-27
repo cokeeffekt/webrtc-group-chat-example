@@ -1,0 +1,19 @@
+{
+  "apps": [{
+      "name": "socket-server",
+      "script": "server.js",
+      "watch": ["server.js", "pws.js", "snub.js"],
+      "cwd": "./",
+      "instances": 0,
+      "exec_mode": "cluster"
+    },
+    {
+      "name": "handler",
+      "script": "handler.js",
+      "watch": ["handler.js", "pws.js", "snub.js"],
+      "cwd": "./",
+      "instances": 0,
+      "exec_mode": "cluster"
+    }
+  ]
+}
